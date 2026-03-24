@@ -26,7 +26,6 @@ from aws_cdk import (
     Environment,
     CfnOutput,
     aws_iam as iam,
-    aws_s3_deployment as s3deploy,
     aws_s3 as s3,
     aws_lambda as lambda_,
     Duration,
@@ -37,7 +36,9 @@ from aws_cdk import (
 )
 from constructs import Construct
 import os
-import json
+
+from stacks.infra_stack import GSWorkflowBaseStack
+
 
 class GSWorkflowPostDeployStack(Stack):
     """Class for Post Deploy Infrastructure Stack"""
@@ -47,7 +48,7 @@ class GSWorkflowPostDeployStack(Stack):
             id: str,
             env: Environment,
             config_data: dict,
-            base_stack: Stack,
+            base_stack: GSWorkflowBaseStack,
             build_args: dict,
             dockerfile_path: str,
             **kwargs) -> None:
@@ -66,8 +67,8 @@ class GSWorkflowPostDeployStack(Stack):
             if base_stack is None:
                 raise ValueError("base_stack is required but was None")
 
-            ecr_repo_name = base_stack.ecr_repo_name
-            s3_bucket_name = base_stack.bucket_name
+            ecr_repo_name = base_stack.ecr.repository.repository_name
+            s3_bucket_name = base_stack.s3.bucket.bucket_name
 
             # Log output data for debugging
             print(f"ECR Repo Name: {ecr_repo_name}")
@@ -112,9 +113,9 @@ class GSWorkflowPostDeployStack(Stack):
                 id="ContainerDeployment",
                 env=env,
                 config_data=config_data,
-                output_data={'ECRRepoName': ecr_repo_name, 'S3BucketName': s3_bucket_name},
                 build_args=build_args,
-                dockerfile_path=dockerfile_path
+                dockerfile_path=dockerfile_path,
+                ecr=base_stack.ecr,
             )
 
             # Add outputs

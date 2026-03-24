@@ -35,7 +35,6 @@ class Ddb(Construct):
             scope: Construct,
             id: str,
             env: Environment,
-            ddb_table_name: str,
             partition_key: str,
             sort_key: str,
             billing_mode: ddb.BillingMode,
@@ -61,7 +60,6 @@ class Ddb(Construct):
 
         # Base table configuration
         table_props = {
-            'table_name': ddb_table_name,
             'partition_key': {
                 'name': partition_key,
                 'type': ddb.AttributeType.STRING
