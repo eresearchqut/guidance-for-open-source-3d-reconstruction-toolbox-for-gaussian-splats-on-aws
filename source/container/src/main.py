@@ -906,7 +906,7 @@ if __name__ == "__main__":
                         )
                     else:
                         args = [
-                            "mapper",
+                            "global_mapper",
                             "--database_path", colmap_db_path,
                             "--image_path", image_path,
                             "--output_path", sparse_path
@@ -916,7 +916,7 @@ if __name__ == "__main__":
                             name="GlomapSfM-Mapper",
                             comp_type=ComponentType.transform,
                             comp_environ=ComponentEnvironment.executable,
-                            command="glomap",
+                            command="colmap",
                             cwd=current_dir_path,
                             args=args,
                             requires_gpu=False

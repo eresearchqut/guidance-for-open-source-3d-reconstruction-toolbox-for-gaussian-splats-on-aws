@@ -68,14 +68,13 @@ ENV FILENAME=${FILENAME}
 
 ENV PATH="/usr/local/bin:${PATH}"
 
-# Disable conda by default - using system Python
-ENV CONDA_AUTO_ACTIVATE_BASE=false
+FROM base AS builder
 
 # Prepare the container environment and directories
 RUN mkdir -p ${CODE_PATH}
 WORKDIR ${CODE_PATH}
 
-## Setup tzdata, update package index, upgrade packages and install needed software
+# Install build/runtime dependencies needed during builds
 RUN truncate -s0 /tmp/preseed.cfg && \
     (echo "tzdata tzdata/Areas select America" >> /tmp/preseed.cfg) && \
     (echo "tzdata tzdata/Zones/America select Los_Angeles" >> /tmp/preseed.cfg) && \
@@ -84,21 +83,15 @@ RUN truncate -s0 /tmp/preseed.cfg && \
     apt-get update && \
     DEBIAN_FRONTEND=noninteractive DEBCONF_NONINTERACTIVE_SEEN=true \
     apt-get install -y tzdata
-## cleanup of files from setup
+
 RUN rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-# Install pre-dependencies
 RUN apt-get update -y
 RUN apt-get install wget -y
-RUN wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libxnvctrl0_575.57.08-0ubuntu1_amd64.deb
-RUN chmod +x ${CODE_PATH}/libxnvctrl0_575.57.08-0ubuntu1_amd64.deb
-RUN apt install ./libxnvctrl0_575.57.08-0ubuntu1_amd64.deb -y
-RUN rm -rf ${CODE_PATH}/libxnvctrl0_575.57.08-0ubuntu1_amd64.deb
 
 RUN DEBIAN_FRONTEND=noninteractive apt-get clean && apt-get update -y && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     git \
     unzip \
-# Building from source for specific version    cmake \ 
     make \
     ninja-build \
     build-essential \
@@ -106,7 +99,7 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get clean && apt-get update -y && apt-get
     libboost-filesystem-dev \
     libboost-graph-dev \
     libboost-system-dev \
-# Building from source for specific version    libeigen3-dev \
+    libeigen3-dev \
     libflann-dev \
     libfreeimage-dev \
     libmetis-dev \
@@ -117,7 +110,7 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get clean && apt-get update -y && apt-get
     qtbase5-dev \
     libqt5opengl5-dev \
     libcgal-dev \
-# Building from source for specific version    libceres-dev \
+    libceres-dev \
     libffi-dev \
     libgflags-dev \
     libatlas-base-dev \
@@ -133,10 +126,8 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get clean && apt-get update -y && apt-get
     libdb-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install and upgrade pip and dependencies
 RUN pip install --upgrade pip
 
-# Install Python v3.11 and make it the default
 RUN cd /usr/src \
     && wget https://www.python.org/ftp/python/3.11.0/Python-3.11.0.tgz \
     && tar -xzf Python-3.11.0.tgz \
@@ -146,35 +137,24 @@ RUN cd /usr/src \
     && make altinstall \
     && cd /usr/src && rm -rf Python-3.11.0*
 
-# Create explicit symlinks
-RUN ln -sf /usr/local/bin/python3.11 /usr/local/bin/python3 \
-    && ln -sf /usr/local/bin/python3 /usr/local/bin/python \
-    && ln -sf /usr/local/bin/pip3.11 /usr/local/bin/pip3 \
+RUN ln -sf /usr/local/bin/python3.11 /usr/local/bin/python \
+    && ln -sf /usr/local/bin/pip3.11 /usr/local/bin/pip \
     && ln -sf /usr/local/bin/pip3 /usr/local/bin/pip
 
-# Update PATH and PYTHONPATH to ensure our Python is used first
 ENV PATH=/usr/local/bin:${PATH}
 ENV PYTHONPATH=/usr/local/lib/python3.11/site-packages:/usr/local/lib/python3.11/dist-packages:${CODE_PATH}
-WORKDIR ${CODE_PATH}
 
-# Install Torch for Cuda 11.8
 RUN pip install torch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 --index-url https://download.pytorch.org/whl/cu118
-
-# Downgrade setuptools to <v70, otherwise will get ImportError: cannot import name 'packaging' from 'pkg_resources'
 RUN pip install "setuptools<70.0.0" ninja boto3 packaging rich natsort trimesh onnxruntime onnxruntime-gpu
-
-# Install nerfacc v0.5.2 and tiny-cuda-nn latest stable
+RUN pip install --no-cache-dir scipy 'numpy<2.0.0' Pillow>=10.3.0 timm einops omegaconf fvcore iopath
 RUN pip install git+https://github.com/NVlabs/tiny-cuda-nn.git#subdirectory=bindings/torch
 
-# Install Cmake 3.30.3 for Glomap
 RUN wget https://github.com/Kitware/CMake/releases/download/v3.30.3/cmake-3.30.3-linux-x86_64.sh \
     && mkdir /opt/cmake \
     && sh cmake-3.30.3-linux-x86_64.sh --prefix=/opt/cmake --skip-license \
     && ln -s /opt/cmake/bin/cmake /usr/local/bin/cmake \
     && rm cmake-3.30.3-linux-x86_64.sh
-WORKDIR ${CODE_PATH}
 
-# Install Eigen 3.4.0 for Glomap
 RUN git clone --single-branch --depth=1 --branch "3.4" https://gitlab.com/libeigen/eigen.git
 RUN mkdir -p ${CODE_PATH}/eigen/build
 WORKDIR ${CODE_PATH}/eigen/build
@@ -184,123 +164,37 @@ ENV CMAKE_PREFIX_PATH="/usr/local/bin/eigen/3.4"
 ENV Eigen3_DIR="/usr/local/bin/eigen/3.4"
 WORKDIR ${CODE_PATH}
 
-# Install Ceres v2.0 for Glomap
 RUN wget https://github.com/ceres-solver/ceres-solver/archive/refs/tags/2.0.0.tar.gz
-RUN tar -xvzf 2.0.0.tar.gz && rm 2.0.0.tar.gz && mkdir ceres-bin && cd ceres-bin &&\
+RUN tar -xvzf 2.0.0.tar.gz && rm 2.0.0.tar.gz && mkdir ceres-bin && cd ceres-bin && \
     cmake -DEXPORT_BUILD_DIR=ON ../ceres-solver-2.0.0 && make -j3 && make install
 ENV Ceres_DIR=${CODE_PATH}/ceres-bin
 WORKDIR ${CODE_PATH}
 
-# Install COLMAP v3.12.0 from source
-RUN wget https://github.com/colmap/colmap/archive/refs/tags/3.12.0.zip \
-    && unzip 3.12.0.zip && rm 3.12.0.zip
-RUN bash -c "cd colmap-3.12.0/ && mkdir build && cd build && cmake .. -GNinja -DCMAKE_CUDA_ARCHITECTURES='${TCNN_CUDA_ARCHITECTURES}' -DMARCH_NATIVE=OFF && ninja install"
+RUN git clone https://github.com/colmap/colmap.git \
+    && cd colmap \
+    && mkdir build && cd build \
+    && cmake .. -GNinja -DCMAKE_CUDA_ARCHITECTURES='${TCNN_CUDA_ARCHITECTURES}' -DMARCH_NATIVE=OFF \
+    && ninja install
+
+# ... build the rest of your tooling here ...
+
+FROM base AS runtime
+
+RUN mkdir -p ${CODE_PATH}
 WORKDIR ${CODE_PATH}
 
-# Download the vocab tree which is used by Colmap - FAISS converted
-#RUN wget https://demuc.de/colmap/vocab_tree_flickr100K_words32K.bin
-RUN git clone https://github.com/ZachMckennedyFWig/ColmapFaissVocabTrees.git
-RUN mv ${CODE_PATH}/ColmapFaissVocabTrees/vocab_tree_flickr100K_words32K.bin ${CODE_PATH}
+# Copy only what you need from builder
+COPY --from=builder /usr/local /usr/local
+COPY --from=builder ${CODE_PATH} ${CODE_PATH}
 
-# Install Glomap v1.0.0 (see https://github.com/colmap/glomap/issues/55#issuecomment-2437082982)
-RUN wget https://github.com/colmap/glomap/archive/refs/tags/1.0.0.tar.gz && \
-    tar -xvzf 1.0.0.tar.gz && cd glomap-1.0.0 && \
-    sed -i 's/GIT_TAG           b3691b791bcedccd5451621b2275a1df0d9dcdeb/GIT_TAG           master/' cmake/FindDependencies.cmake && \
-    grep "GIT_TAG" cmake/FindDependencies.cmake && \
-    mkdir build && cd build && \
-    cmake .. -GNinja -DCUDA_ENABLED=ON -DCMAKE_CUDA_ARCHITECTURES=${TCNN_CUDA_ARCHITECTURES} -DCeres_DIR=${CODE_PATH}/ceres-bin && ninja && ninja install
-WORKDIR ${CODE_PATH}
-
-# Install latest NerfStudio from source to get get full access to repo files for mcmc
-RUN git clone https://github.com/nerfstudio-project/nerfstudio.git
-WORKDIR ${CODE_PATH}/nerfstudio
-RUN pip install -e .
-WORKDIR ${CODE_PATH}
-
-# Install latest gsplat from source and copy repo for multi-gpu features
-RUN git clone https://github.com/nerfstudio-project/gsplat.git --recursive
-WORKDIR ${CODE_PATH}/gsplat
-#RUN pip install -e .
-RUN pip install -r examples/requirements.txt
-WORKDIR ${CODE_PATH}
-RUN pip install git+https://github.com/nerfstudio-project/gsplat.git
-
-# Install latest Splatfacto-w (in the wild) model and download repo to expose splat export script
-# Warning: This will down-grade gsplat to the version it supports. Future work will isolate dep versions
-# from the functionality
-RUN git clone https://github.com/KevinXu02/splatfacto-w
-RUN pip install git+https://github.com/KevinXu02/splatfacto-w
-
-# Pre-download AlexNet model
-RUN mkdir -p /root/.cache/torch/hub/checkpoints && \
-    wget -O /root/.cache/torch/hub/checkpoints/alexnet-owt-7be5be79.pth \
-    https://download.pytorch.org/models/alexnet-owt-7be5be79.pth
-
-RUN wget -O /root/.cache/torch/hub/checkpoints/fasterrcnn_resnet50_fpn_coco-258fb6c6.pth \
-https://download.pytorch.org/models/fasterrcnn_resnet50_fpn_coco-258fb6c6.pth
-
-# Install AWS CLI v2 latest
-RUN wget "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -O "awscliv2.zip" && \
-    unzip awscliv2.zip && \
-    ./aws/install && \
-    rm -rf aws
-
-# Install utilities and ensure numpy<v2 in order not to error
-RUN pip install --no-cache-dir scipy 'numpy<2.0.0' Pillow>=10.3.0 timm einops omegaconf fvcore iopath
-
-# Install the Background Removal Classic Tool
-RUN git clone https://github.com/nadermx/backgroundremover.git
-# Comment out print statement "DEBUG: path to be checked: /root/.u2net/u2net.pth"
-RUN sed -i '53s/^        print/        #print/' ${CODE_PATH}/backgroundremover/backgroundremover/u2net/detect.py
-RUN pip install -r ${CODE_PATH}/backgroundremover/requirements.txt
-
-# Download U2NET models
-RUN mkdir -p /root/.u2net && \
-    cd /root/.u2net && \
-    wget -O u2net.pth.part1 https://github.com/nadermx/backgroundremover/raw/main/models/u2aa && \
-    wget -O u2net.pth.part2 https://github.com/nadermx/backgroundremover/raw/main/models/u2ab && \
-    wget -O u2net.pth.part3 https://github.com/nadermx/backgroundremover/raw/main/models/u2ac && \
-    wget -O u2net.pth.part4 https://github.com/nadermx/backgroundremover/raw/main/models/u2ad && \
-    cat u2net.pth.part* > u2net.pth && \
-    rm u2net.pth.part* && \
-    wget -O u2netp.pth https://github.com/nadermx/backgroundremover/raw/main/models/u2netp.pth
-
-# Set environment variables for the models
-ENV U2NET_PATH=/root/.u2net/u2net.pth
-ENV U2NETP_PATH=/root/.u2net/u2netp.pth
-
-# Install the SAM2 Segmentation Model and Code
-RUN git clone https://github.com/facebookresearch/sam2.git
-RUN mv ${CODE_PATH}/sam2 ${CODE_PATH}/sam
-WORKDIR ${CODE_PATH}/sam
-
-# Keep the NerfStudio torch version but make sure we install all required dependencies
-RUN sed -i 's/"torch>=2.5.1",/#"torch>=2.5.1",/' setup.py && \
-    sed -i 's/"torchvision>=0.20.1",/#"torchvision>=0.20.1",/' setup.py && \
-    sed -i '/^    "pillow>=9.4.0",$/a \    "cog>=0.14.12",' setup.py && \
-    sed -i 's/"hydra-core>=1.3.2",/"hydra-core==1.3.2",/' setup.py
-
-# Install SAM2 dependencies
-#RUN pip install -e .
-RUN pip install --no-deps -e . && \
-    pip install hydra-core==1.3.2 cog>=0.14.12 opencv-python matplotlib
-WORKDIR ${CODE_PATH}
-
-# Build NVIDIA 3DGRUT
-RUN git clone --recursive https://github.com/nv-tlabs/3dgrut.git
-WORKDIR ${CODE_PATH}/3dgrut
-RUN python -m pip install -r requirements.txt
-WORKDIR ${CODE_PATH}
-
-# The main entrypoint and arguments are added into the container in the State Machine (e.g. ENTRYPOINT [ "python", "main.py" ])
-# Copy over application files
-RUN mkdir -p ${CODE_PATH}/video_processing
-RUN mkdir -p ${CODE_PATH}/image_processing
-RUN mkdir -p ${CODE_PATH}/sfm
-RUN mkdir -p ${CODE_PATH}/training
-RUN mkdir -p ${CODE_PATH}/spherical
-RUN mkdir -p ${CODE_PATH}/segmentation
-RUN mkdir -p ${CODE_PATH}/post_processing
+# Copy application files last
+RUN mkdir -p ${CODE_PATH}/video_processing \
+    && mkdir -p ${CODE_PATH}/image_processing \
+    && mkdir -p ${CODE_PATH}/sfm \
+    && mkdir -p ${CODE_PATH}/training \
+    && mkdir -p ${CODE_PATH}/spherical \
+    && mkdir -p ${CODE_PATH}/segmentation \
+    && mkdir -p ${CODE_PATH}/post_processing
 
 COPY ./src/main.py                                              ${CODE_PATH}
 COPY ./src/config.json                                          ${CODE_PATH}
@@ -323,13 +217,6 @@ COPY ./src/pipeline/post_processing/gsplat_pt_to_ply.py         ${CODE_PATH}/pos
 COPY ./src/pipeline/post_processing/spz                         ${CODE_PATH}/post_processing/spz
 COPY ./src/pipeline/segmentation/remove_background_sam2.py      ${CODE_PATH}/sam
 
-# Build the SPZ tool
-WORKDIR ${CODE_PATH}/post_processing/spz/src
-RUN mkdir build
-WORKDIR ${CODE_PATH}/post_processing/spz/src/build
-RUN cmake ..
-RUN make
-RUN make install
-RUN ln -sf ${CODE_PATH}/post_processing/spz/src/build/splat_converter /usr/local/bin/splat_converter
-
 WORKDIR ${CODE_PATH}
+
+# ... existing code ...

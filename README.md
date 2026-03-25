@@ -81,7 +81,7 @@ In this project, there is only one Docker container that contains all of the 3D 
 The list of open source libraries that make this project possible include:
 
 - [NerfStudio](https://github.com/nerfstudio-project/nerfstudio) [(Apache-2.0)](https://github.com/nerfstudio-project/nerfstudio/tree/main?tab=Apache-2.0-1-ov-file#readme) - Splat Training Engine
-- [Glomap](https://github.com/colmap/glomap)[(BSD-3-Clause)](https://github.com/colmap/glomap?tab=BSD-3-Clause-1-ov-file#readme) - Global SfM
+- [Glomap](https://github.com/colmap/colmap)[(BSD-3-Clause)](https://github.com/colmap/colmap/blob/main/LICENSE.txt) - Global SfM (Integrated in COLMAP)
 - [Colmap](https://github.com/colmap/colmap) [(BSD)](https://github.com/colmap/colmap?tab=License-1-ov-file#readme) - Incremental SfM
 - [OpenCV](https://github.com/opencv/opencv) [(Apache-2.0)](https://github.com/opencv/opencv?tab=Apache-2.0-1-ov-file#readme) - Video and Image Processing
 - [gsplat](https://github.com/nerfstudio-project/gsplat) [(Apache-2.0)](https://github.com/nerfstudio-project/gsplat?tab=Apache-2.0-1-ov-file#readme) - Splat Model

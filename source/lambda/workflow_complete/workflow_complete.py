@@ -129,8 +129,8 @@ def is_sfm_failure(message):
         'torch.multinomial',
         'gsplat/strategy/ops.py',
         '_multinomial_sample',
-        'glomap::ViewGraph::KeepLargestConnectedComponents',
-        'Command \'glomap mapper\'' and 'failed with return code -11'
+        'colmap::ViewGraph::KeepLargestConnectedComponents',
+        'Command \'colmap global_mapper\'' and 'failed with return code -11'
     ]
     
     if any(pattern in message for pattern in sfm_patterns):
@@ -223,7 +223,7 @@ def get_cloudwatch_logs(training_job_name):
             'torch.multinomial',
             'TORCH_USE_CUDA_DSA',
             'device-side assertions',
-            'glomap::ViewGraph::KeepLargestConnectedComponents'
+            'colmap::ViewGraph::KeepLargestConnectedComponents'
         ]
         
         def should_ignore_message(message):
@@ -246,7 +246,7 @@ def get_cloudwatch_logs(training_job_name):
                 '_wrap',
                 'Distributed worker:',
                 'Warning: image_path not found for reconstruction',
-                'glomap::ViewGraph::KeepLargestConnectedComponents'
+                'colmap::ViewGraph::KeepLargestConnectedComponents'
             ]
             
             if any(pattern in message for pattern in pytorch_ignore_patterns):
