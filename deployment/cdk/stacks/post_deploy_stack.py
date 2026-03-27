@@ -21,6 +21,7 @@
 """Post deployment stack to build the container and deploy model components"""
 
 from stacks.components.container_deployment import ContainerDeployment
+from stacks.components.prebuilt_container_deployment import PrebuiltContainerDeployment
 from aws_cdk import (
     Stack,
     Environment,
@@ -108,15 +109,25 @@ class GSWorkflowPostDeployStack(Stack):
             )
 
             # Container Deployment Construct
-            container_deployment = ContainerDeployment(
-                scope=self,
-                id="ContainerDeployment",
-                env=env,
-                config_data=config_data,
-                build_args=build_args,
-                dockerfile_path=dockerfile_path,
-                ecr=base_stack.ecr,
-            )
+            ecr_image_arn = config_data.get("ecrImageArn", "")
+            
+            if ecr_image_arn:
+                self.container_deployment = PrebuiltContainerDeployment(
+                    scope=self,
+                    id="ContainerDeployment",
+                    ecr_arn=ecr_image_arn,
+                    env=env
+                )
+            else:
+                self.container_deployment = ContainerDeployment(
+                    scope=self,
+                    id="ContainerDeployment",
+                    env=env,
+                    config_data=config_data,
+                    build_args=build_args,
+                    dockerfile_path=dockerfile_path,
+                    ecr=base_stack.ecr,
+                )
 
             # Add outputs
             CfnOutput(
