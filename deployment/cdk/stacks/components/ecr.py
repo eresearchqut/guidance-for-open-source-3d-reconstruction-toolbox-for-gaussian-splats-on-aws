@@ -35,15 +35,12 @@ class Ecr(Construct):
             scope: Construct,
             id: str,
             env: Environment,
-            ecr_repo_name: str,
-            s3_bucket_name: str,
-            container_role_name: str, **kwargs) -> None:
+            s3_bucket_name: str, **kwargs) -> None:
         super().__init__(scope, id, **kwargs)
 
         # Create the ECR repository
         self.repository = ecr.Repository(
             self, "EcrRepo",
-            repository_name=ecr_repo_name,
             removal_policy=RemovalPolicy.DESTROY,
             empty_on_delete=True,
             #auto_delete_images=True,
@@ -54,13 +51,10 @@ class Ecr(Construct):
 
         # Create the Container IAM Role
         self.container_role = self.create_container_role(
-            env,
-            self.repository,
             s3_bucket_name,
-            container_role_name
         )
 
-    def create_container_role(self, env, ecr_repo_name, s3_bucket_name, container_role_name) -> iam.Role:
+    def create_container_role(self, s3_bucket_name) -> iam.Role:
         """Function to create the Container Iam Role"""
         # Define the IAM policy
         #container_policy_statement_ecr1 = iam.PolicyStatement(
@@ -83,7 +77,7 @@ class Ecr(Construct):
                 "ecr:GetAuthorizationToken"
             ],
             resources=[
-                f"arn:aws:ecr:{env.region}:{env.account}:repository/{ecr_repo_name}"
+                self.repository.repository_arn
             ]
         )
 
@@ -139,7 +133,6 @@ class Ecr(Construct):
                 iam.ServicePrincipal("ec2.amazonaws.com"),
                 iam.ServicePrincipal("sagemaker.amazonaws.com")
             ),
-            role_name=container_role_name,
             description="An IAM role for the Container",
             managed_policies=[
                 iam.ManagedPolicy.from_aws_managed_policy_name(

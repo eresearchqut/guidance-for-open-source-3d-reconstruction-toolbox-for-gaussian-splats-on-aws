@@ -38,8 +38,6 @@ from aws_cdk import (
     Environment
 )
 from constructs import Construct
-import random
-import string
 import os
 
 class GSWorkflowBaseStack(Stack):
@@ -56,13 +54,6 @@ class GSWorkflowBaseStack(Stack):
         # Initialize Ids and Variables
         self.prefix = config_data['constructNamePrefix']
         self.s3_trigger_key = config_data['s3TriggerKey']
-        self.random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
-        self.bucket_name = f"{self.prefix}-bucket-{self.random_id}"
-        self.ecr_repo_name = f"{self.prefix}-ecr-repo-{self.random_id}"
-        self.sfn_ssm_param_name = f"{self.prefix}-sfn-arn-{self.random_id}"
-        self.container_role_name = f"{self.prefix}-container-role-{self.random_id}"
-        self.ddb_table_name = f"{self.prefix}-ddb-table-{self.random_id}"
-        self.state_machine_name = f"{self.prefix}-sfn-{self.random_id}"
         self.maintain_s3_objects_on_stack_deletion = config_data['maintainS3ObjectsOnStackDeletion']
         self.current_path = os.path.dirname(os.path.realpath(__file__))
 
@@ -78,18 +69,6 @@ class GSWorkflowBaseStack(Stack):
         # Create outputs
         CfnOutput(self, "SnsTopicName", value=sns.sns_topic.topic_name)
         CfnOutput(self, "SnsTopicArn", value=sns.sns_topic.topic_arn)
-
-        # ECR Construct
-        self.ecr = Ecr(
-            scope=self,
-            id="EcrConstruct",
-            env=env,
-            ecr_repo_name=self.ecr_repo_name,
-            s3_bucket_name=self.bucket_name,
-            container_role_name=self.container_role_name
-        )
-        CfnOutput(self, "ECRRepoName", value=self.ecr.repository.repository_name)
-        CfnOutput(self, "ContainerRoleArn", value=self.ecr.container_role.role_arn)
 
         sns_topic_arn = f"arn:aws:sns:{env.region}:{env.account}:{sns.sns_topic.topic_name}"
         sns_statement = iam.PolicyStatement(
@@ -119,80 +98,11 @@ class GSWorkflowBaseStack(Stack):
             ]
         )
 
-        # Lambda: Workflow Complete Construct
-        lambda_workflow_complete = Lambda(
-            scope=self,
-            id="LambdaWorkflowCompleteConstruct",
-            env=env,
-            runtime=lambda_.Runtime.PYTHON_3_12,
-            code_path=os.path.join(
-                self.current_path,
-                "../../../source/lambda/workflow_complete"),
-            main_function="lambda_handler",
-            timeout=Duration.seconds(30),
-            memory=128,
-            storage=512,
-            env_vars= {
-                'DDB_TABLE_NAME': self.ddb_table_name,
-                'SNS_TOPIC_ARN': sns.sns_topic.topic_arn
-            },
-            reserved_concurrent_executions=100,
-            tracing=lambda_.Tracing.ACTIVE
-        )
-        CfnOutput(
-            self,
-            'LambdaWorkflowCompleteFunctionName',
-            value=lambda_workflow_complete.lambda_function.function_name
-        )
-
-        # Lambda: Workflow Trigger Construct
-        lambda_workflow_trigger = Lambda(
-            scope=self,
-            id="LambdaWorkflowTriggerConstruct",
-            env=env,
-            runtime=lambda_.Runtime.PYTHON_3_12,
-            code_path=os.path.join(self.current_path,
-                                "../../../source/lambda/workflow_trigger"),
-            main_function="lambda_handler",
-            timeout=Duration.seconds(30),
-            memory=128,
-            storage=512,
-            env_vars= {
-                'STATE_MACHINE_PARAM_NAME': self.sfn_ssm_param_name,
-                'SNS_TOPIC_ARN': sns_topic_arn,
-                'LAMBDA_COMPLETE_NAME': lambda_workflow_complete.lambda_function.function_name,
-                'DDB_TABLE_NAME': self.ddb_table_name,
-                'ECR_IMAGE_URI': self.ecr.repository.repository_uri,
-                'CONTAINER_ROLE_NAME': self.container_role_name
-                },
-            reserved_concurrent_executions=100,
-            tracing=lambda_.Tracing.ACTIVE
-        )
-        CfnOutput(
-            self,
-            'LambdaWorkflowTriggerFunctionName',
-            value=lambda_workflow_trigger.lambda_function.function_name
-        )
-
-        # S3 Construct
-        s3 = S3(
-            scope=self,
-            id="S3Construct",
-            env=env,
-            bucket_name=self.bucket_name,
-            trigger_lambda_function=lambda_workflow_trigger.lambda_function,
-            s3_trigger_key=self.s3_trigger_key,
-            s3_trigger_extension=".json",
-            maintain_s3_objects_on_stack_deletion=self.maintain_s3_objects_on_stack_deletion
-        )
-        CfnOutput(self, "S3BucketName", value=s3.bucket.bucket_name)
-
         # DynamoDB Construct
         ddb = Ddb(
             scope=self,
             id="DdbConstruct",
             env=env,
-            ddb_table_name=self.ddb_table_name,
             partition_key="uuid",
             sort_key=None,
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST, #dynamodb.BillingMode.PROVISIONED
@@ -207,18 +117,102 @@ class GSWorkflowBaseStack(Stack):
         )
         CfnOutput(self, 'DynamoDBTableName', value=ddb.table.table_name)
 
+        # Lambda: Workflow Complete Construct
+        lambda_workflow_complete = Lambda(
+            scope=self,
+            id="LambdaWorkflowCompleteConstruct",
+            env=env,
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            code_path=os.path.join(
+                self.current_path,
+                "../../../source/lambda/workflow_complete"),
+            main_function="lambda_handler",
+            timeout=Duration.seconds(30),
+            memory=128,
+            storage=512,
+            env_vars= {
+                'DDB_TABLE_NAME': ddb.table.table_name,
+                'SNS_TOPIC_ARN': sns.sns_topic.topic_arn
+            },
+            reserved_concurrent_executions=100,
+            tracing=lambda_.Tracing.ACTIVE
+        )
+        CfnOutput(
+            self,
+            'LambdaWorkflowCompleteFunctionName',
+            value=lambda_workflow_complete.lambda_function.function_name
+        )
+
+
+        # Lambda: Workflow Trigger Construct
+        lambda_workflow_trigger = Lambda(
+            scope=self,
+            id="LambdaWorkflowTriggerConstruct",
+            env=env,
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            code_path=os.path.join(self.current_path,
+                                "../../../source/lambda/workflow_trigger"),
+            main_function="lambda_handler",
+            timeout=Duration.seconds(30),
+            memory=128,
+            storage=512,
+            env_vars= {
+                'SNS_TOPIC_ARN': sns_topic_arn,
+                'LAMBDA_COMPLETE_NAME': lambda_workflow_complete.lambda_function.function_name,
+                'DDB_TABLE_NAME': ddb.table.table_name,
+                },
+            reserved_concurrent_executions=100,
+            tracing=lambda_.Tracing.ACTIVE
+        )
+        CfnOutput(
+            self,
+            'LambdaWorkflowTriggerFunctionName',
+            value=lambda_workflow_trigger.lambda_function.function_name
+        )
+
+        # S3 Construct
+        self.s3 = S3(
+            scope=self,
+            id="S3Construct",
+            env=env,
+            trigger_lambda_function=lambda_workflow_trigger.lambda_function,
+            s3_trigger_key=self.s3_trigger_key,
+            s3_trigger_extension=".json",
+            maintain_s3_objects_on_stack_deletion=self.maintain_s3_objects_on_stack_deletion
+        )
+        CfnOutput(self, "S3BucketName", value=self.s3.bucket.bucket_name)
+
+        # ECR Construct
+        self.ecr = Ecr(
+            scope=self,
+            id="EcrConstruct",
+            env=env,
+            s3_bucket_name=self.s3.bucket.bucket_name,
+        )
+        CfnOutput(self, "ECRRepoName", value=self.ecr.repository.repository_name)
+        CfnOutput(self, "ContainerRoleArn", value=self.ecr.container_role.role_arn)
+
+        lambda_workflow_trigger.lambda_function.add_environment(
+            'ECR_IMAGE_URI',
+            self.ecr.repository.repository_uri
+        )
+
+        lambda_workflow_complete.lambda_function.add_environment(
+            'CONTAINER_ROLE_NAME',
+            self.ecr.container_role.role_name
+        )
+
         # Step Functions Construct
         sfn = Sfn(
             scope=self,
             id="SfnConstruct",
             env=env,
-            state_machine_name=self.state_machine_name,
             asl_code_path=os.path.join(self.current_path,
                                         "../../../source/state-machines/ASLdefinition.json"),
             workflow_trigger_lambda_arn=lambda_workflow_trigger.lambda_function.function_arn,
             workflow_complete_lambda_arn=lambda_workflow_complete.lambda_function.function_arn,
-            ecr_repo_name=self.ecr_repo_name,
-            container_role_name=self.container_role_name
+            ecr_repo_name=self.ecr.repository.repository_name,
+            container_role_name=self.ecr.container_role.role_name
         )
         CfnOutput(self, "StateMachineName", value=sfn.state_machine.state_machine_name)
 
@@ -226,10 +220,14 @@ class GSWorkflowBaseStack(Stack):
         ssm_sfn_arn = ssm.StringParameter(
             self,
             "SfnArnParameter",
-            parameter_name=self.sfn_ssm_param_name,
             string_value=sfn.state_machine.state_machine_arn
         )
         CfnOutput(self, "SfnArnSsmParameterName", value=ssm_sfn_arn.parameter_name)
+
+        lambda_workflow_trigger.lambda_function.add_environment(
+            'STATE_MACHINE_PARAM_NAME',
+            ssm_sfn_arn.parameter_name
+        )
 
         ########### IAM Roles and Policies ##########
         # Define the DDB IAM policy statement
@@ -250,7 +248,7 @@ class GSWorkflowBaseStack(Stack):
                 "dynamodb:UpdateItem"
                 ],
             resources=[
-                f"arn:aws:dynamodb:{env.region}:{env.account}:table/{self.ddb_table_name}"
+                ddb.table.table_arn
             ]
         )
 
@@ -271,8 +269,8 @@ class GSWorkflowBaseStack(Stack):
                         ],
                         effect=iam.Effect.ALLOW,
                         resources=[
-                            f"arn:aws:s3:::{self.bucket_name}",
-                            f"arn:aws:s3:::{self.bucket_name}/*",
+                            f"arn:aws:s3:::{self.s3.bucket.bucket_name}",
+                            f"arn:aws:s3:::{self.s3.bucket.bucket_name}/*",
                         ]
             )
         )
@@ -285,7 +283,7 @@ class GSWorkflowBaseStack(Stack):
                         ],
                         effect=iam.Effect.ALLOW,
                         resources=[
-                            f"arn:aws:ssm:{env.region}:{env.account}:parameter/{self.sfn_ssm_param_name}"
+                            ssm_sfn_arn.parameter_arn
                         ]
             )
         )

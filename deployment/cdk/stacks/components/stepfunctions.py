@@ -36,7 +36,6 @@ class Sfn(Construct):
             scope: Construct,
             id: str,
             env: Environment,
-            state_machine_name: str,
             asl_code_path: str,
             workflow_trigger_lambda_arn: str,
             workflow_complete_lambda_arn: str,
@@ -47,7 +46,6 @@ class Sfn(Construct):
         self.current_path = os.path.dirname(os.path.realpath(__file__))
         self.state_machine = self.create_state_machine(
             env,
-            state_machine_name,
             asl_code_path,
             workflow_trigger_lambda_arn,
             workflow_complete_lambda_arn,
@@ -58,7 +56,6 @@ class Sfn(Construct):
     def create_state_machine(
             self,
             env,
-            state_machine_name,
             asl_code_path,
             workflow_trigger_lambda_arn,
             workflow_complete_lambda_arn,
@@ -67,9 +64,10 @@ class Sfn(Construct):
         """Function to create the State Machine component"""
 
         # Define the state machine
+        state_machine_id = "StateMachine"
         state_machine = sfn.StateMachine(
-            self, "StateMachine",
-            state_machine_name=state_machine_name,
+            self,
+            id=state_machine_id,
             definition_body=sfn.DefinitionBody.from_file(path=asl_code_path),
             role=self.create_state_machine_role(
                 env,
@@ -77,11 +75,10 @@ class Sfn(Construct):
                 workflow_complete_lambda_arn,
                 ecr_repo_name,
                 container_role_name,
-                state_machine_name
             ),
             tracing_enabled=True,
             logs=sfn.LogOptions(
-                destination=logs.LogGroup(self, state_machine_name),  # Creates a new log group
+                destination=logs.LogGroup(self,  f"{state_machine_id}LogGroup"),  # Creates a new log group
                 level=sfn.LogLevel.ALL,  # Log all events
                 include_execution_data=True  # Include execution data in logs
     )
@@ -94,8 +91,7 @@ class Sfn(Construct):
             workflow_trigger_lambda_arn,
             workflow_complete_lambda_arn,
             ecr_repo_name,
-            container_role_name,
-            state_machine_name) -> iam.Role:
+            container_role_name) -> iam.Role:
         """Function to create the State Machine Iam Role"""
         # Define the Lambda Invoke IAM policy document
         lambda_invoke_statement = iam.PolicyStatement(
@@ -212,7 +208,6 @@ class Sfn(Construct):
         role = iam.Role(
             self, "StateMachineExecutionRole",
             assumed_by=iam.ServicePrincipal("states.amazonaws.com"),
-            role_name=f"{state_machine_name}-ExecutionRole",
             description="An IAM role for Step Functions",
             managed_policies=[
                 iam.ManagedPolicy.from_aws_managed_policy_name(

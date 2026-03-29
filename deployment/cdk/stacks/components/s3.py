@@ -38,7 +38,6 @@ class S3(Construct):
             scope: Construct,
             id: str,
             env: Environment,
-            bucket_name: str,
             trigger_lambda_function: lambda_.Function,
             s3_trigger_key: str,
             s3_trigger_extension: str,
@@ -49,12 +48,11 @@ class S3(Construct):
         removal_policy = RemovalPolicy.DESTROY
         if maintain_s3_objects_on_stack_deletion.lower() == "true":
             removal_policy = RemovalPolicy.RETAIN
-            
+
         # Create a logging bucket with proper configuration
         self.log_bucket = s3.Bucket(
             self,
             "LoggingBucket",
-            bucket_name=f"{bucket_name}-logs",
             versioned=True,
             enforce_ssl=True,
             encryption=s3.BucketEncryption.S3_MANAGED,
@@ -78,30 +76,10 @@ class S3(Construct):
             ]
         )
 
-        # Grant S3 log delivery permissions to the logging bucket
-        self.log_bucket.add_to_resource_policy(
-            iam.PolicyStatement(
-                sid="S3ServerAccessLogsPolicy",
-                effect=iam.Effect.ALLOW,
-                principals=[iam.ServicePrincipal("logging.s3.amazonaws.com")],
-                actions=["s3:PutObject"],
-                resources=[f"{self.log_bucket.bucket_arn}/*"],
-                conditions={
-                    "StringEquals": {
-                        "aws:SourceAccount": env.account
-                    },
-                    "ArnLike": {
-                        "aws:SourceArn": f"arn:aws:s3:::{bucket_name}"
-                    }
-                }
-            )
-        )
-
         # Create the main bucket with proper configuration
         self.bucket = s3.Bucket(
             self,
             "AssetBucket",
-            bucket_name=bucket_name,
             versioned=True,
             enforce_ssl=True,
             encryption=s3.BucketEncryption.S3_MANAGED,
@@ -156,6 +134,25 @@ class S3(Construct):
             ]
         )
 
+        # Grant S3 log delivery permissions to the logging bucket
+        self.log_bucket.add_to_resource_policy(
+            iam.PolicyStatement(
+                sid="S3ServerAccessLogsPolicy",
+                effect=iam.Effect.ALLOW,
+                principals=[iam.ServicePrincipal("logging.s3.amazonaws.com")],
+                actions=["s3:PutObject"],
+                resources=[f"{self.log_bucket.bucket_arn}/*"],
+                conditions={
+                    "StringEquals": {
+                        "aws:SourceAccount": env.account
+                    },
+                    "ArnLike": {
+                        "aws:SourceArn": self.bucket.bucket_arn
+                    }
+                }
+            )
+        )
+
         # Add secure transport policy
         self.bucket.add_to_resource_policy(
             iam.PolicyStatement(
@@ -181,7 +178,7 @@ class S3(Construct):
         # Add S3 notification
         try:
             notification = aws_s3_notifications.LambdaDestination(trigger_lambda_function)
-            
+
             self.bucket.add_event_notification(
                 s3.EventType.OBJECT_CREATED_PUT,
                 notification,

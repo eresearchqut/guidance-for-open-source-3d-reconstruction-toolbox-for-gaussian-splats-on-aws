@@ -74,20 +74,12 @@ if select_all or bundling_stacks is None or len(bundling_stacks) == 0 or (bundli
         print("Post-deploy stack condition is TRUE")
         try:
             print("Creating post-deploy stack...")
-            outputs_path = os.path.join(current_path, "outputs.json")
-            print(f"Looking for outputs file at: {outputs_path}")
-            print(f"File exists: {os.path.exists(outputs_path)}")
-            
-            # Try to read existing outputs
-            with open(outputs_path, "r", encoding="utf-8") as f:
-                output_data = json.load(f)
-                print(f"Successfully loaded outputs data: {list(output_data.keys()) if output_data else 'empty'}")
             
             post_deploy_stack = GSWorkflowPostDeployStack(
                 scope=app,
                 id="GSWorkflowPostDeployStack",
                 config_data=config_data,
-                output_json_path=outputs_path,
+                base_stack=base_stack if 'base_stack' in locals() else None,
                 build_args=build_args,
                 dockerfile_path=os.path.join(current_path, "../../source/container"),
                 env=environment,
@@ -98,8 +90,6 @@ if select_all or bundling_stacks is None or len(bundling_stacks) == 0 or (bundli
             if 'base_stack' in locals():
                 post_deploy_stack.add_dependency(base_stack)
                 print("Added dependency on base stack")
-        except (FileNotFoundError, KeyError) as e:
-            print(f"Warning: Could not create post-deploy stack due to missing outputs: {e}")
         except Exception as e:
             print(f"Error creating post-deploy stack: {str(e)}")
 else:

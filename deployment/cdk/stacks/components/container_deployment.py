@@ -22,17 +22,15 @@
 
 from aws_cdk import (
     Environment,
-    RemovalPolicy,
-    aws_ecr as ecr,
     aws_iam as iam,
     aws_ecr_assets as ecr_assets,
     CfnOutput
 )
-from aws_cdk.aws_ecr_assets import DockerImageAsset
 import cdk_ecr_deployment
 from constructs import Construct
-import json
 import os
+
+from stacks.components.ecr import Ecr
 
 class ContainerDeployment(Construct):
     """Class for Container Deployment Construct"""
@@ -41,10 +39,10 @@ class ContainerDeployment(Construct):
             scope: Construct,
             id: str,
             config_data: dict,
-            output_data: dict,
             build_args: dict,
             dockerfile_path: str,
             env: Environment,
+            ecr: Ecr,
             **kwargs) -> None:
         super().__init__(scope, id, **kwargs)
 
@@ -54,17 +52,6 @@ class ContainerDeployment(Construct):
                 raise ValueError(f"Invalid dockerfile path: {dockerfile_path}")
             if not os.path.exists(os.path.join(dockerfile_path, "Dockerfile")):
                 raise ValueError(f"Dockerfile not found in {dockerfile_path}")
-
-            # Get ECR repository name
-            print(output_data)
-            # Check if output_data already has the GSWorkflowBaseStack key or is already the stack outputs
-            if 'GSWorkflowBaseStack' in output_data:
-                ecr_repo_name = output_data['GSWorkflowBaseStack']['ECRRepoName']
-            else:
-                ecr_repo_name = output_data['ECRRepoName']
-                
-            if not ecr_repo_name:
-                raise ValueError("ECR repository name not found in output data")
 
             # Create deployment role with required permissions
             deployment_role = iam.Role(
@@ -95,7 +82,7 @@ class ContainerDeployment(Construct):
                         "ecr:CompleteLayerUpload",
                         "ecr:PutImage"
                     ],
-                    resources=[f"arn:aws:ecr:{env.region}:{env.account}:repository/{ecr_repo_name}"]
+                    resources=[ecr.repository.repository_arn]
                 )
             )
 
@@ -103,7 +90,6 @@ class ContainerDeployment(Construct):
             self.asset = ecr_assets.DockerImageAsset(
                 self,
                 "DockerImage",
-                asset_name=ecr_repo_name,
                 directory=dockerfile_path,
                 build_args=build_args,
                 platform=ecr_assets.Platform.LINUX_AMD64,
@@ -116,7 +102,7 @@ class ContainerDeployment(Construct):
                 "DeployDockerImage",
                 src=cdk_ecr_deployment.DockerImageName(self.asset.image_uri),
                 dest=cdk_ecr_deployment.DockerImageName(
-                    f"{env.account}.dkr.ecr.{env.region}.amazonaws.com/{ecr_repo_name}:latest"
+                    ecr.repository.repository_uri
                 ),
                 role=deployment_role,
                 memory_limit=512,
@@ -137,7 +123,7 @@ class ContainerDeployment(Construct):
             CfnOutput(
                 self,
                 "ECRRepositoryUri",
-                value=f"{env.account}.dkr.ecr.{env.region}.amazonaws.com/{ecr_repo_name}",
+                value=ecr.repository.repository_uri,
                 description="URI of the ECR repository"
             )
 

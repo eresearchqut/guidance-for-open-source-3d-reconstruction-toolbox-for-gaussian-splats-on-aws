@@ -21,12 +21,12 @@
 """Post deployment stack to build the container and deploy model components"""
 
 from stacks.components.container_deployment import ContainerDeployment
+from stacks.components.prebuilt_container_deployment import PrebuiltContainerDeployment
 from aws_cdk import (
     Stack,
     Environment,
     CfnOutput,
     aws_iam as iam,
-    aws_s3_deployment as s3deploy,
     aws_s3 as s3,
     aws_lambda as lambda_,
     Duration,
@@ -37,7 +37,9 @@ from aws_cdk import (
 )
 from constructs import Construct
 import os
-import json
+
+from stacks.infra_stack import GSWorkflowBaseStack
+
 
 class GSWorkflowPostDeployStack(Stack):
     """Class for Post Deploy Infrastructure Stack"""
@@ -47,7 +49,7 @@ class GSWorkflowPostDeployStack(Stack):
             id: str,
             env: Environment,
             config_data: dict,
-            output_json_path: str,
+            base_stack: GSWorkflowBaseStack,
             build_args: dict,
             dockerfile_path: str,
             **kwargs) -> None:
@@ -63,26 +65,15 @@ class GSWorkflowPostDeployStack(Stack):
             if not os.path.exists(os.path.join(dockerfile_path, "Dockerfile")):
                 raise ValueError(f"Dockerfile not found in {dockerfile_path}")
 
-            # Load and validate output data
-            try:
-                with open(output_json_path, 'r', encoding='utf-8') as f:
-                    output_data = json.load(f)
-                
-                if 'GSWorkflowBaseStack' not in output_data:
-                    raise KeyError("Base stack outputs not found")
+            if base_stack is None:
+                raise ValueError("base_stack is required but was None")
 
-                # Validate required outputs
-                required_outputs = ['ECRRepoName', 'S3BucketName']
-                for output in required_outputs:
-                    if output not in output_data['GSWorkflowBaseStack']:
-                        raise KeyError(f"Required output '{output}' not found in base stack outputs")
+            ecr_repo_name = base_stack.ecr.repository.repository_name
+            s3_bucket_name = base_stack.s3.bucket.bucket_name
 
-                # Log output data for debugging
-                print(f"ECR Repo Name: {output_data['GSWorkflowBaseStack']['ECRRepoName']}")
-                print(f"S3 Bucket Name: {output_data['GSWorkflowBaseStack']['S3BucketName']}")
-
-            except json.JSONDecodeError as e:
-                raise ValueError(f"Invalid JSON in output file: {e}")
+            # Log output data for debugging
+            print(f"ECR Repo Name: {ecr_repo_name}")
+            print(f"S3 Bucket Name: {s3_bucket_name}")
 
             # Create deployment role with required permissions
             deployment_role = iam.Role(
@@ -113,33 +104,43 @@ class GSWorkflowPostDeployStack(Stack):
                         "ecr:CompleteLayerUpload",
                         "ecr:PutImage"
                     ],
-                    resources=[f"arn:aws:ecr:{env.region}:{env.account}:repository/{output_data['GSWorkflowBaseStack']['ECRRepoName']}"]
+                    resources=[f"arn:aws:ecr:{env.region}:{env.account}:repository/{ecr_repo_name}"]
                 )
             )
 
             # Container Deployment Construct
-            container_deployment = ContainerDeployment(
-                scope=self,
-                id="ContainerDeployment",
-                env=env,
-                config_data=config_data,
-                output_data=output_data['GSWorkflowBaseStack'],
-                build_args=build_args,
-                dockerfile_path=dockerfile_path
-            )
+            ecr_image_arn = config_data.get("ecrImageArn", "")
+            
+            if ecr_image_arn:
+                self.container_deployment = PrebuiltContainerDeployment(
+                    scope=self,
+                    id="ContainerDeployment",
+                    ecr_arn=ecr_image_arn,
+                    env=env
+                )
+            else:
+                self.container_deployment = ContainerDeployment(
+                    scope=self,
+                    id="ContainerDeployment",
+                    env=env,
+                    config_data=config_data,
+                    build_args=build_args,
+                    dockerfile_path=dockerfile_path,
+                    ecr=base_stack.ecr,
+                )
 
             # Add outputs
             CfnOutput(
                 self,
                 "DeploymentBucketName",
-                value=output_data['GSWorkflowBaseStack']['S3BucketName'],
+                value=s3_bucket_name,
                 description="Name of the deployment bucket"
             )
 
             CfnOutput(
                 self,
                 "ECRRepositoryName",
-                value=output_data['GSWorkflowBaseStack']['ECRRepoName'],
+                value=ecr_repo_name,
                 description="Name of the ECR repository"
             )
 
@@ -166,7 +167,7 @@ class GSWorkflowPostDeployStack(Stack):
             s3_bucket = s3.Bucket.from_bucket_name(
                 self, 
                 "ImportedBucket", 
-                output_data['GSWorkflowBaseStack']['S3BucketName']
+                s3_bucket_name
             )
             s3_bucket.grant_read_write(model_deployment_lambda)
 
@@ -183,7 +184,7 @@ class GSWorkflowPostDeployStack(Stack):
                 "ModelDeployment",
                 service_token=provider.service_token,
                 properties={
-                    "BucketName": output_data['GSWorkflowBaseStack']['S3BucketName'],
+                    "BucketName": s3_bucket_name,
                     "Timestamp": str(os.path.getmtime(__file__)),  # Force update on code change
                     "DeploymentId": f"{id}-{env.account}-{env.region}"  # Ensure uniqueness
                 }
@@ -193,7 +194,7 @@ class GSWorkflowPostDeployStack(Stack):
             CfnOutput(
                 self,
                 "ModelsArchiveLocation",
-                value=f"s3://{output_data['GSWorkflowBaseStack']['S3BucketName']}/models/models.tar.gz",
+                value=f"s3://{s3_bucket_name}/models/models.tar.gz",
                 description="Location of the models archive in S3"
             )
 
